@@ -1,0 +1,110 @@
+import { createClient } from "@supabase/supabase-js";
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: true,
+  },
+});
+
+// Auth helper functions
+export const signUp = async (
+  email: string,
+  password: string,
+  fullName?: string
+) => {
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      data: {
+        full_name: fullName,
+      },
+    },
+  });
+  return { data, error };
+};
+
+export const signIn = async (email: string, password: string) => {
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
+  return { data, error };
+};
+
+export const signInWithGoogle = async () => {
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: {
+      redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback`,
+    },
+  });
+  return { data, error };
+};
+
+export const signOut = async () => {
+  const { error } = await supabase.auth.signOut();
+  return { error };
+};
+
+export const getCurrentUser = async () => {
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+  return { user, error };
+};
+
+// Fetch user profile data from the users table
+export const getUserProfile = async (userId: string) => {
+  try {
+    // Get the basic user profile data
+    const { data, error } = await supabase
+      .from("users")
+      .select("*")
+      .eq("id", userId)
+      .single();
+
+    if (error) {
+      console.error("Error fetching user profile:", error.message);
+      return { data: null, error: error.message };
+    }
+
+    // If no data is found, handle that specifically
+    if (!data) {
+      return { data: null, error: "User not found" };
+    }
+    
+    // Check for subscription status in payment_subscriptions table
+    const { data: subscriptionData, error: subscriptionError } = await supabase
+      .from("payment_subscriptions")
+      .select("subscription_type, created_at")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    
+    // If we found a subscription and it's more recent than the user's subscription_start_date,
+    // use its subscription_type instead
+    if (subscriptionData && !subscriptionError) {
+      const subscriptionCreatedAt = new Date(subscriptionData.created_at);
+      const userSubStartDate = data.subscription_start_date 
+        ? new Date(data.subscription_start_date) 
+        : null;
+      
+      if (!userSubStartDate || subscriptionCreatedAt > userSubStartDate) {
+        data.subscription_type = subscriptionData.subscription_type;
+      }
+    }
+    
+    return { data, error: null };
+  } catch (err) {
+    console.error("Error fetching user profile:", err);
+    return { data: null, error: "Failed to fetch user profile data" };
+  }
+};
