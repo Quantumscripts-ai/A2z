@@ -1,8 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { StorageClient } from "@/types/supabase";
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 
 export const runtime = "nodejs";
+
+const s3Client = new S3Client({
+  region: process.env.AWS_REGION || "us-east-1",
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+  },
+});
+
+const BUCKET_NAME = process.env.S3_BUCKET_NAME!;
 
 export async function POST(req: NextRequest) {
   try {
@@ -24,7 +34,7 @@ export async function POST(req: NextRequest) {
         filename: file.name,
         language,
         status: "uploaded",
-        file_size: file.size, // Add file size in bytes
+        file_size: file.size,
       })
       .select("id")
       .single();
@@ -39,35 +49,31 @@ export async function POST(req: NextRequest) {
 
     const videoId: string = inserted.id;
 
-    // Upload file to storage bucket "videos" at path userId/videoId/filename
+    // Upload file to S3
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
     const storagePath = `${userId}/${videoId}/${file.name}`;
 
-    const { error: storageError } = await (
-      supabaseAdmin.storage as StorageClient
-    )
-      .from("videos")
-      .upload(storagePath, buffer, {
-        contentType: file.type || "application/octet-stream",
-        upsert: true,
-      });
+    const uploadCommand = new PutObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: storagePath,
+      Body: buffer,
+      ContentType: file.type || "application/octet-stream",
+    });
 
-    if (storageError) {
-      console.error(storageError);
+    try {
+      await s3Client.send(uploadCommand);
+    } catch (storageError) {
+      console.error("S3 upload error:", storageError);
       return NextResponse.json(
-        { error: "Failed to upload to storage" },
+        { error: "Failed to upload to S3" },
         { status: 500 }
       );
     }
 
-    // Get public URL (if bucket is public) or signed URL for access
-    const { data: publicUrlData } = (supabaseAdmin.storage as StorageClient)
-      .from("videos")
-      .getPublicUrl(storagePath);
-
-    const file_url = publicUrlData?.publicUrl || storagePath;
+    // Generate S3 public URL
+    const file_url = `https://${BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${storagePath}`;
 
     // Save storage path & url to DB
     const { error: updateError } = await supabaseAdmin

@@ -1,7 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 export const runtime = "nodejs";
+
+const s3Client = new S3Client({
+  region: process.env.AWS_REGION || "us-east-1",
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+  },
+});
+
+const BUCKET_NAME = process.env.S3_BUCKET_NAME!;
 
 export async function POST(req: NextRequest) {
   try {
@@ -14,30 +25,23 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Create signed URL using admin client
-    const { data: signedData, error: signedError } = await supabaseAdmin.storage
-      .from("videos")
-      .createSignedUrl(storagePath, expiresIn);
+    // Create S3 presigned URL
+    const command = new GetObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: storagePath, // S3 object key (file path)
+    });
 
-    if (signedError) {
-      console.error("❌ Error creating signed URL:", signedError);
-      return NextResponse.json({ error: signedError.message }, { status: 500 });
-    }
-
-    if (!signedData?.signedUrl) {
-      return NextResponse.json(
-        { error: "Failed to generate signed URL" },
-        { status: 500 }
-      );
-    }
+    const signedUrl = await getSignedUrl(s3Client, command, { 
+      expiresIn: expiresIn 
+    });
 
     return NextResponse.json({
       success: true,
-      signedUrl: signedData.signedUrl,
+      signedUrl: signedUrl,
     });
   } catch (err: unknown) {
     const errorMessage = err instanceof Error ? err.message : "Server error";
-    console.error("❌ Signed URL generation error:", err);
+    console.error("❌ S3 signed URL generation error:", err);
     return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
 }
