@@ -15,6 +15,7 @@ const s3Client = new S3Client({
 const BUCKET_NAME = process.env.S3_BUCKET_NAME!;
 
 export async function POST(req: NextRequest) {
+  console.log("Upload request received");
   try {
     const formData = await req.formData();
     const file = formData.get("file") as File | null;

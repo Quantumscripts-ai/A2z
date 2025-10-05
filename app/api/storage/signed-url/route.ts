@@ -15,6 +15,7 @@ const s3Client = new S3Client({
 const BUCKET_NAME = process.env.S3_BUCKET_NAME!;
 
 export async function POST(req: NextRequest) {
+  console.log("Signed URL request received");
   try {
     const { storagePath, expiresIn = 3600 } = await req.json();
 
